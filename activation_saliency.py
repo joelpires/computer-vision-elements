@@ -15,10 +15,11 @@ from keras.layers import Conv2D, MaxPooling2D
 from keras import backend as K
 
 from vis.visualization import visualize_activation
+from vis.visualization import visualize_saliency
 from vis.utils import utils
 from keras import activations
 from matplotlib import pyplot as plt
-
+from vis.visualization import visualize_cam
 
 batch_size = 128
 num_classes = 10
@@ -112,3 +113,99 @@ for output_idx in np.arange(10):
     plt.figure()
     plt.title('Networks perception of {}'.format(output_idx))
     plt.imshow(img[..., 0])
+
+
+# ### Saliency Visualizations
+
+class_idx = 0
+indices = np.where(y_test[:, class_idx] == 1.)[0]
+
+# pick some random input from here.
+idx = indices[0]
+
+# Utility to search for layer index by name.
+# Alternatively we can specify this as -1 since it corresponds to the last layer.
+layer_idx = utils.find_layer_idx(model, 'preds')
+
+# Swap softmax with linear
+model.layers[layer_idx].activation = activations.linear
+model = utils.apply_modifications(model)
+
+grads = visualize_saliency(model, layer_idx, filter_indices=class_idx, seed_input=x_test[idx])
+# Plot with 'jet' colormap to visualize as a heatmap.
+plt.imshow(grads, cmap='jet')
+
+
+# To used guided saliency, we need to set backprop_modifier='guided'. For rectified saliency or deconv saliency, use backprop_modifier='relu'. Lets try these options quickly and see how they compare to vanilla saliency.
+
+for modifier in ['guided', 'relu']:
+    grads = visualize_saliency(model, layer_idx, filter_indices=class_idx,
+                               seed_input=x_test[idx], backprop_modifier=modifier)
+    plt.figure()
+    plt.title(modifier)
+    plt.imshow(grads, cmap='jet')
+
+
+grads = visualize_saliency(model, layer_idx, filter_indices=class_idx, seed_input=x_test[idx],
+                           backprop_modifier='guided', grad_modifier='negate')
+plt.imshow(grads, cmap='jet')
+
+
+# This corresponds to the Dense linear layer.
+for class_idx in np.arange(10):
+    indices = np.where(y_test[:, class_idx] == 1.)[0]
+    idx = indices[0]
+
+    f, ax = plt.subplots(1, 4)
+    ax[0].imshow(x_test[idx][..., 0])
+
+    for i, modifier in enumerate([None, 'guided', 'relu']):
+        grads = visualize_saliency(model, layer_idx, filter_indices=class_idx,
+                                   seed_input=x_test[idx], backprop_modifier=modifier)
+        if modifier is None:
+            modifier = 'vanilla'
+        ax[i+1].set_title(modifier)
+        ax[i+1].imshow(grads, cmap='jet')
+
+
+# Guided saliency seems to give the best results
+
+
+# This corresponds to the Dense linear layer.
+for class_idx in np.arange(10):
+    indices = np.where(y_test[:, class_idx] == 1.)[0]
+    idx = indices[0]
+
+    f, ax = plt.subplots(1, 4)
+    ax[0].imshow(x_test[idx][..., 0])
+
+    for i, modifier in enumerate([None, 'guided', 'relu']):
+        grads = visualize_cam(model, layer_idx, filter_indices=class_idx,
+                              seed_input=x_test[idx], backprop_modifier=modifier)
+        if modifier is None:
+            modifier = 'vanilla'
+        ax[i+1].set_title(modifier)
+        ax[i+1].imshow(grads, cmap='jet')
+
+
+print(model.summary())
+
+
+#
+# ## Visualization without swapping softmax
+
+
+# Swap linear back with softmax
+model.layers[layer_idx].activation = activations.softmax
+model = utils.apply_modifications(model)
+
+for class_idx in np.arange(10):
+    indices = np.where(y_test[:, class_idx] == 1.)[0]
+    idx = indices[0]
+
+    grads = visualize_saliency(model, layer_idx, filter_indices=class_idx,
+                               seed_input=x_test[idx], backprop_modifier='guided')
+
+    f, ax = plt.subplots(1, 2)
+    ax[0].imshow(x_test[idx][..., 0])
+    ax[1].imshow(grads, cmap='jet')
